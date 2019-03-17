@@ -1,0 +1,64 @@
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body style="margin: 0px">
+<canvas id="scene">
+</canvas>
+</body>
+<script id="surface.vert" type="x-shader/x-vertex">
+attribute vec3 vertexPosition;
+attribute vec4 vertexTexCoord;
+
+varying vec4 texCoord;
+
+uniform mat4 VP;
+
+void main()
+{
+	texCoord = vertexTexCoord;
+    gl_Position = VP * vec4(vertexPosition, 1);
+}
+</script>
+<script id="surface.frag" type="x-shader/x-fragment">
+precision mediump float;
+
+varying vec4 texCoord;
+
+uniform sampler2D blockTexture;
+uniform sampler2D mapTexture;
+
+void main()
+{
+	float start = texCoord.z; // in 1/512
+	float stride = texCoord.w; // in 1/512, e.g. 4/512 for 4 pixel width
+	
+	float ix = floor(texCoord.x); // integer part of coord
+	float iy = floor(texCoord.y); // integer part of coord
+	
+	float fx = texCoord.x - ix; // fraction part of coord
+	float fy = texCoord.y - iy; // fraction part of coord
+	
+	float pixel = start + iy * stride + ix * (1.0 / 512.0); // linear map coordinate
+	
+	float ipixel = floor(pixel); // integer part of linear coordinate, 1 means full row
+	float fpixel = pixel - ipixel;
+	
+	vec2 pixelCoord;
+	pixelCoord.x = fpixel; // fractional part is x coordinate
+	pixelCoord.y = ipixel * (1.0 / 512.0); // convert linear integer into y coordinate
+	
+	// do block lookup
+	vec4 blockLookup = texture2D(mapTexture, pixelCoord);
+	
+    vec4 materialColor = vec4(1, 1, 0, 1);
+
+    gl_FragColor = materialColor;
+}
+</script>
+<script src="js/resource-loader.js"></script>
+<script src="js/gl-matrix-min.js"></script>
+<!--<script src="js/gl-debug.js"></script>-->
+<script src="js/render.js"></script>
+<script src="js/engine.js"></script>
+</html>
