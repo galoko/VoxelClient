@@ -21,7 +21,8 @@ void main()
 }
 </script>
 <script id="surface.frag" type="x-shader/x-fragment">
-precision mediump float;
+precision lowp float;
+precision lowp sampler2D;
 
 varying vec4 texCoord;
 
@@ -45,17 +46,29 @@ void main()
 	float fpixel = pixel - ipixel;
 	
 	vec2 pixelCoord;
-	pixelCoord.x = fpixel; // fractional part is x coordinate
-	pixelCoord.y = ipixel * (1.0 / 512.0); // convert linear integer into y coordinate
+	// centring the pixel
+	pixelCoord.x =  (0.5 / 512.0) + fpixel; // fractional part is x coordinate
+	pixelCoord.y =  (0.5 / 512.0) + ipixel * (1.0 / 512.0); // convert linear integer into y coordinate
 	
 	// do block lookup
-	vec4 blockLookup = texture2D(mapTexture, pixelCoord);
+	vec4 mapLookup = texture2D(mapTexture, pixelCoord);
 	
-    vec4 materialColor = vec4(1, 1, 0, 1);
+	vec2 blockCoord;
+	blockCoord.x = mapLookup.r * 255.0;
+	blockCoord.y = mapLookup.g * 255.0;
+	
+	blockCoord.x = clamp(blockCoord.x + fx, blockCoord.x + (0.5 / 32.0), blockCoord.x + 1.0 - (0.5 / 32.0)) / 2.0;
+	blockCoord.y = clamp(blockCoord.y + fy, blockCoord.y + (0.5 / 32.0), blockCoord.y + 1.0 - (0.5 / 32.0)) / 2.0;
+	
+	float lightLevel = mapLookup.b;
+	vec4 light = vec4(lightLevel, lightLevel, lightLevel, 1.0);
+	
+	vec4 blockLookup = texture2D(blockTexture, blockCoord);
 
-    gl_FragColor = materialColor;
+    gl_FragColor = blockLookup * light;
 }
 </script>
+<script src="js/allocator.js"></script>
 <script src="js/resource-loader.js"></script>
 <script src="js/gl-matrix-min.js"></script>
 <!--<script src="js/gl-debug.js"></script>-->

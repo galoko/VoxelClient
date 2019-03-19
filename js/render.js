@@ -31,6 +31,8 @@ Render.prototype.setupGL = function() {
     gl.frontFace(gl.CW);
     gl.cullFace(gl.BACK);
 	
+	gl.enable(gl.DEPTH_TEST);
+	
 	gl.clearColor(0, 0, 1, 1);
 	
 	// shader
@@ -52,11 +54,25 @@ Render.prototype.setupGL = function() {
 	
 	// buffers
 	
-    this.surfaceVertexBuffer = gl.createBuffer();
-	this.surfaceIndexBuffer = gl.createBuffer();
+	var VERTEX_BUFFER_SIZE = 32 * 32 * 32 * 6 * 4;
 	
-	gl.bindBuffer(gl.ARRAY_BUFFER, this.surfaceVertexBuffer);
-	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.surfaceIndexBuffer);
+    this.vertexBuffer = gl.createBuffer();
+	gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+	// vertices -> floats -> bytes
+	gl.bufferData(gl.ARRAY_BUFFER, VERTEX_BUFFER_SIZE * 7 * 4, gl.STATIC_DRAW);
+	
+	this.verticesAllocator = new Allocator(VERTEX_BUFFER_SIZE);
+	
+	var INDEX_BUFFER_SIZE = 32 * 32 * 32 * 6 * 6;
+	
+	this.indexBuffer = gl.createBuffer();	
+	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
+	// indices -> shorts -> bytes
+	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, INDEX_BUFFER_SIZE * 1 * 2, gl.STATIC_DRAW);
+	
+	this.indicesAllocator = new Allocator(INDEX_BUFFER_SIZE);
+	
+	// vertex layout
 	
     gl.vertexAttribPointer(this.surfaceShader.vertexPosition, 3, 
 		gl.FLOAT, false,
@@ -69,8 +85,6 @@ Render.prototype.setupGL = function() {
 		7 * Float32Array.BYTES_PER_ELEMENT, 
 		3 * Float32Array.BYTES_PER_ELEMENT);
 	gl.enableVertexAttribArray(this.surfaceShader.vertexTexCoord);
-	
-	this.indicesCount = 0;
 	
 	// camera
 	
@@ -86,26 +100,34 @@ Render.prototype.setupGL = function() {
 Render.prototype.loaded = function () {
 	var gl = this.gl;
 	
+	gl.activeTexture(gl.TEXTURE0);
 	this.blockTexture = resourceLoader.blocks;
-    gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.blockTexture);	
 	
+	gl.activeTexture(gl.TEXTURE1);
 	this.mapTexture = resourceLoader.createTexture(512);
-    gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.mapTexture);
 	
-	this.allocatedPixelCount = 0;
+	this.mapPixelAllocator = new Allocator(512 * 512);
 	
-	// this.debugMapPixels();
+	// this.debugWritePixels();
 };
 
 Render.prototype.setupScreenSize = function () {
 	
-	this.screenWidth = window.innerWidth;
-	this.screenHeight = window.innerHeight;
+	var width = window.innerWidth;
+	var height = window.innerHeight;
+	
+	var dpr = window.devicePixelRatio;
+	
+	this.screenWidth = width * dpr;
+	this.screenHeight = height * dpr;
 	
 	this.canvas.width = this.screenWidth;
 	this.canvas.height = this.screenHeight;
+	
+	this.canvas.style.width = width + "px";
+	this.canvas.style.height = height + "px";
 	
 	this.updateProjectionMatrix();
 	
@@ -188,6 +210,86 @@ Render.prototype.transferViewProjection = function (shader) {
 	}
 };
 
+// surface data -> gpu representation
+
+Render.prototype.setPixelsSubRegion = function (dstPixel, srcPixel, surface, width, height) {
+	var gl = this.gl;
+	
+	var dstX = dstPixel % 512;
+	var dstY = Math.trunc(dstPixel / 512);
+	
+	var size = width * height;
+	var byteSize = size * 4;
+	var pixels = new Uint8Array(byteSize);
+	
+	// TODO calc this value using block texture size in pixels
+	var BLOCK_TEX_SIZE_IN_BLOCKS = 2;
+	
+	for (var i = srcPixel, j = 0; i < srcPixel + size; i++, j += 4) {
+		
+		var blockId = surface.tex[i]; // 0..65535
+		var lightLevel = surface.light[i]; // 0..15
+		
+		var blockX = blockId % BLOCK_TEX_SIZE_IN_BLOCKS;
+		var blockY = Math.trunc(blockId / BLOCK_TEX_SIZE_IN_BLOCKS);
+		
+		pixels[j + 0] = blockX;
+		pixels[j + 1] = blockY;
+		pixels[j + 2] = lightLevel * 17; // 0..15 -> 0..255
+		pixels[j + 3] = 0;
+	}
+	
+	gl.texSubImage2D(gl.TEXTURE_2D, 0, dstX, dstY, width, height, 
+		gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+};
+
+Render.prototype.writePixels = function (surface) {
+		
+	var currentDstPixel = surface.startPixel;
+	var currentSrcPixel = 0;
+	
+	var inputPixelRemaining = surface.pixelCount - currentSrcPixel;
+	if (inputPixelRemaining < 1)
+		return;
+		
+	var allowedToWriteToCurrentRow = 512 - currentDstPixel % 512;
+	if (allowedToWriteToCurrentRow < 512) {
+				
+		var writeCount = Math.min(allowedToWriteToCurrentRow, inputPixelRemaining);
+			
+		this.setPixelsSubRegion(currentDstPixel, currentSrcPixel, surface, 
+			writeCount, 1);
+		
+		currentDstPixel += writeCount;
+		currentSrcPixel += writeCount;
+		
+		// update remaining pixels
+		inputPixelRemaining = surface.pixelCount - currentSrcPixel;
+		if (inputPixelRemaining < 1)
+			return;
+	}
+	
+	var inputFullRowCount = Math.trunc(inputPixelRemaining / 512);
+	if (inputFullRowCount > 0) {
+		
+		var writeCount = inputFullRowCount * 512;
+		
+		this.setPixelsSubRegion(currentDstPixel, currentSrcPixel, surface, 
+			512, inputFullRowCount);
+		
+		currentDstPixel += writeCount;
+		currentSrcPixel += writeCount;
+		
+		// update remaining pixels
+		inputPixelRemaining = surface.pixelCount - currentSrcPixel;
+		if (inputPixelRemaining < 1)
+			return;
+	}
+	
+	this.setPixelsSubRegion(currentDstPixel, currentSrcPixel, surface, 
+		inputPixelRemaining, 1);
+};
+
 Render.prototype.convertFunctions = [
 	// x y c
 	function (x, y, c, dstVertices, dstIndex) {
@@ -209,11 +311,11 @@ Render.prototype.convertFunctions = [
 	}
 ];
 
-Render.prototype.calcSurfaceIndirectValues = function (surface) {
+Render.prototype.writeVertices = function (surface) {
+	var gl = this.gl;
 	
 	var rect = { };
-	var shaderVertices = new Float32Array(surface.vertices.length / 2 * 7);
-	var shaderIndices = new Uint16Array(surface.indices);
+	var shaderVertices = new Float32Array(surface.vertexCount * 7);
 
 	var convertFunction = this.convertFunctions[Math.trunc(surface.type / 2)];
 
@@ -234,160 +336,74 @@ Render.prototype.calcSurfaceIndirectValues = function (surface) {
 	rect.width = rect.right - rect.left;
 	rect.height = rect.bottom - rect.top;
 	
-	surface.rect = rect;
-	surface.shaderVertices = shaderVertices;
-	surface.shaderIndices = shaderIndices;
-};
-
-Render.prototype.writePixels = function (dstPixel, srcPixel, tex, light, width, height) {
-	var gl = this.gl;
-	
-	var dstX = dstPixel % 512;
-	var dstY = Math.trunc(dstPixel / 512);
-	
-	var size = width * height;
-	var byteSize = size * 4;
-	var pixels = new Uint8Array(byteSize);
-	
-	for (var i = srcPixel, j = 0; i < srcPixel + size; i++, j += 4) {
-		
-		var t = tex[i];
-		var l = light[i];
-		
-		pixels[j + 0] = t % 256;
-		pixels[j + 1] = Math.trunc(t / 256);
-		pixels[j + 2] = l % 256;
-		pixels[j + 3] = Math.trunc(l / 256);
-	}
-	
-	gl.texSubImage2D(gl.TEXTURE_2D, 0, dstX, dstY, width, height, 
-		gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-};
-
-Render.prototype.mapPixels = function (startPixel, pixelCount, tex, light) {
-	
-	console.assert(tex.length === pixelCount);
-	console.assert(light.length === pixelCount);
-	
-	var currentDstPixel = startPixel;
-	var currentSrcPixel = 0;
-	
-	var inputPixelRemaining = pixelCount - currentSrcPixel;
-	if (inputPixelRemaining < 1)
-		return;
-		
-	var allowedToWriteToCurrentRow = 512 - currentDstPixel % 512;
-	if (allowedToWriteToCurrentRow < 512) {
-				
-		var writeCount = Math.min(allowedToWriteToCurrentRow, inputPixelRemaining);
-			
-		this.writePixels(currentDstPixel, currentSrcPixel, tex, light, 
-			writeCount, 1);
-		
-		currentDstPixel += writeCount;
-		currentSrcPixel += writeCount;
-		
-		// update remaining pixels
-		inputPixelRemaining = pixelCount - currentSrcPixel;
-		if (inputPixelRemaining < 1)
-			return;
-	}
-	
-	var inputFullRowCount = Math.trunc(inputPixelRemaining / 512);
-	if (inputFullRowCount > 0) {
-		
-		var writeCount = inputFullRowCount * 512;
-		
-		this.writePixels(currentDstPixel, currentSrcPixel, tex, light, 
-			512, inputFullRowCount);
-		
-		currentDstPixel += writeCount;
-		currentSrcPixel += writeCount;
-		
-		// update remaining pixels
-		inputPixelRemaining = pixelCount - currentSrcPixel;
-		if (inputPixelRemaining < 1)
-			return;
-	}
-	
-	this.writePixels(currentDstPixel, currentSrcPixel, tex, light, 
-		inputPixelRemaining, 1);
-};
-
-Render.prototype.debugMapPixels = function () {
-	
-	var tex0 = new Uint16Array(12);
-	var light0 = new Uint16Array(12);
-	
-	var tex1 = new Uint16Array((512 - 12) + 512 + 512 + 8);
-	var light1 = new Uint16Array((512 - 12) + 512 + 512 + 8);
-	
-	var tex2 = new Uint16Array((512 - 8));
-	var light2 = new Uint16Array((512 - 8));
-	
-	this.mapPixels(this.allocateMapPixels(tex0.length), tex0, light0);	
-	this.mapPixels(this.allocateMapPixels(tex1.length), tex1, light1);	
-	this.mapPixels(this.allocateMapPixels(tex2.length), tex2, light2);
-};
-
-Render.prototype.allocateMapPixels = function (count) {
-	
-	// TODO lookup free space instead of simply allocating at the end of texture
-	
-	var mapPixelCount = 512 * 512;
-	var remainingPixelCount = mapPixelCount - this.allocatedPixelCount;
-	if (remainingPixelCount < count)
-		throw "Out of map pixels";
-	
-	var result = this.allocatedPixelCount;
-	
-	this.allocatedPixelCount += count;
-	
-	return result;
-};
-
-Render.prototype.allocateTextureData = function (surface) {
-	var gl = this.gl;
-	
-	var surfacePixelCount = surface.rect.width * surface.rect.height;	
-	var startPixel = this.allocateMapPixels(surfacePixelCount);
-	
-	this.mapPixels(startPixel, surfacePixelCount, surface.tex, surface.light);
-	
-	var start = startPixel / 512;
-	var stride = surface.rect.width / 512;
+	var start = surface.startPixel / 512;
+	var stride = rect.width / 512;
 	
 	for (var srcIndex = 0, dstIndex = 3; srcIndex < surface.vertices.length; 
 		srcIndex += 2, dstIndex += 7) {
 			
-		var x = surface.vertices[srcIndex + 0] - surface.rect.left;
-		var y = surface.vertices[srcIndex + 1] - surface.rect.top;
+		var x = surface.vertices[srcIndex + 0] - rect.left;
+		var y = surface.vertices[srcIndex + 1] - rect.top;
 				
-		surface.shaderVertices[dstIndex + 0] = start; // start in 1/512
-		surface.shaderVertices[dstIndex + 1] = stride; // stride in 1/512
-		surface.shaderVertices[dstIndex + 2] = x; // x in blocks
-		surface.shaderVertices[dstIndex + 3] = y; // y in blocks
+		shaderVertices[dstIndex + 0] = x; // x in blocks
+		shaderVertices[dstIndex + 1] = y; // y in blocks
+		shaderVertices[dstIndex + 2] = start; // start in 1/512
+		shaderVertices[dstIndex + 3] = stride; // stride in 1/512
 	}
+	
+	// vertices -> floats -> bytes
+	gl.bufferSubData(gl.ARRAY_BUFFER, surface.startVertex * 7 * 4, shaderVertices);
 };
 
-Render.prototype.bufferVerticesAndIndices = function (surface) {
+Render.prototype.writeIndices = function (surface) {
 	var gl = this.gl;
 	
-	// DEBUG TODO actually do something allocatable and smart
-	gl.bufferData(gl.ARRAY_BUFFER, surface.shaderVertices, gl.STATIC_DRAW);
-	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, surface.shaderIndices, gl.STATIC_DRAW);
+	var shaderIndices = new Uint16Array(surface.indices.length);
 	
-	this.indicesCount += surface.shaderIndices.length;
+	for (var index = 0; index < shaderIndices.length; index++) {
+		shaderIndices[index] = surface.startVertex + surface.indices[index];
+	}
+	
+	// indices -> shorts -> bytes
+	gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, surface.startIndex * 1 * 2, 
+		shaderIndices);
+};
+
+// specific data allocators
+
+Render.prototype.allocateTextureData = function (surface) {
+	var gl = this.gl;
+	
+	surface.pixelCount = surface.tex.length;
+	surface.startPixel = this.mapPixelAllocator.malloc(surface.pixelCount);
+	
+	this.writePixels(surface);
+};
+
+Render.prototype.allocateVertexData = function (surface) {
+	var gl = this.gl;
+	
+	surface.vertexCount = surface.vertices.length / 2;
+	surface.startVertex = this.verticesAllocator.malloc(surface.vertexCount);
+	
+	this.writeVertices(surface);
+};
+
+Render.prototype.allocateIndexData = function (surface) {
+	var gl = this.gl;
+	
+	surface.indexCount = surface.indices.length;
+	surface.startIndex = this.indicesAllocator.malloc(surface.indexCount);
+	
+	this.writeIndices(surface);
 };
 
 Render.prototype.addSurface = function (surface) {
 	var gl = this.gl;
 	
-	this.calcSurfaceIndirectValues(surface);
-	
 	this.allocateTextureData(surface);
-	
-	this.bufferVerticesAndIndices(surface);
+	this.allocateVertexData(surface);
+	this.allocateIndexData(surface);
 };
 
 Render.prototype.draw = function () {
@@ -398,7 +414,8 @@ Render.prototype.draw = function () {
 	this.surfaceShader.use();
 	this.transferViewProjection(this.surfaceShader);
 	
-	gl.drawElements(gl.TRIANGLES, this.indicesCount, gl.UNSIGNED_SHORT, 0);
+	gl.drawElements(gl.TRIANGLES, this.indicesAllocator.getAllocatedCount(), 
+		gl.UNSIGNED_SHORT, 0);
 	
 	this.projectionMatrixNeedUpdate = false;
 	this.viewMatrixNeedUpdate = false;
@@ -461,4 +478,22 @@ Render.prototype.compileShader = function (name, uniforms, attributes) {
     });
 
     return instance;
+};
+
+// tests
+
+Render.prototype.debugWritePixels = function () {
+	
+	var tex0 = new Uint16Array(12);
+	var light0 = new Uint16Array(12);
+	
+	var tex1 = new Uint16Array((512 - 12) + 512 + 512 + 8);
+	var light1 = new Uint16Array((512 - 12) + 512 + 512 + 8);
+	
+	var tex2 = new Uint16Array((512 - 8));
+	var light2 = new Uint16Array((512 - 8));
+	
+	this.writePixels(this.allocateMapPixels(tex0.length), tex0, light0);	
+	this.writePixels(this.allocateMapPixels(tex1.length), tex1, light1);	
+	this.writePixels(this.allocateMapPixels(tex2.length), tex2, light2);
 };

@@ -17,7 +17,7 @@ Engine.prototype.loaded = function () {
 	render.loaded();
 	
 	render.setCameraPosition(0, 0, 1);
-	render.lookAtPoint(1, 1, 0);
+	render.lookAtPoint(3, 3, 0.5);
 	
 	this.debugRender();
 	
@@ -42,14 +42,70 @@ Engine.prototype.debugRender = function () {
 			2, 3, 0
 		],
 		tex: [
-			0, 1, 2,
+			1, 2, 0,
 			2, 1, 3,
-			1, 0, 2
+			0, 3, 1
 		],
 		light: [
+			15, 12, 9,
+			12,  9, 6,
+			 9,  6, 3	
+		]
+	};
+	
+	render.addSurface(surface);
+	
+	var surface = {
+		id: 1,
+		type: 4,
+		vertices: [ 
+			1.0, 0.0, 
+			4.0, 0.0,
+			4.0, 3.0,
+			1.0, 3.0,
+		],
+		constantCoord: 4.0,
+		indices: [
 			0, 1, 2,
-			3, 4, 5,
-			5, 6, 7	
+			2, 3, 0
+		],
+		tex: [
+			0, 0, 0,
+			0, 0, 0,
+			0, 0, 0
+		],
+		light: [
+			 9, 12,  9,
+			12, 15, 12,
+			 9, 12,  9	
+		]
+	};
+	
+	render.addSurface(surface);
+	
+	var surface = {
+		id: 2,
+		type: 2,
+		vertices: [ 
+			1.0, 0.0, 
+			4.0, 0.0,
+			4.0, 3.0,
+			1.0, 3.0,
+		],
+		constantCoord: 4.0,
+		indices: [
+			0, 1, 2,
+			2, 3, 0
+		],
+		tex: [
+			1, 2, 2,
+			2, 2, 2,
+			2, 2, 2
+		],
+		light: [
+			9, 9, 9,
+			7, 7, 7,
+			5, 5, 5	
 		]
 	};
 	
