@@ -52,7 +52,7 @@ Engine.prototype.debugRender = function () {
 			 9,  6, 3	
 		]
 	};
-	
+
 	render.addSurface(surface);
 	
 	var surface = {

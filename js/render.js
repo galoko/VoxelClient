@@ -32,8 +32,8 @@ Render.prototype.setupGL = function() {
     gl.cullFace(gl.BACK);
 	
 	gl.enable(gl.DEPTH_TEST);
-	
-	gl.clearColor(0, 0, 1, 1);
+	  
+	gl.clearColor(0x8F / 255, 0xB1 / 255, 0xD2 / 255, 1);
 	
 	// shader
 	
@@ -115,8 +115,8 @@ Render.prototype.loaded = function () {
 
 Render.prototype.setupScreenSize = function () {
 	
-	var width = window.innerWidth;
-	var height = window.innerHeight;
+	var width = this.canvas.clientWidth;
+	var height = this.canvas.clientHeight;
 	
 	var dpr = window.devicePixelRatio;
 	
@@ -125,9 +125,6 @@ Render.prototype.setupScreenSize = function () {
 	
 	this.canvas.width = this.screenWidth;
 	this.canvas.height = this.screenHeight;
-	
-	this.canvas.style.width = width + "px";
-	this.canvas.style.height = height + "px";
 	
 	this.updateProjectionMatrix();
 	
@@ -344,9 +341,11 @@ Render.prototype.writeVertices = function (surface) {
 			
 		var x = surface.vertices[srcIndex + 0] - rect.left;
 		var y = surface.vertices[srcIndex + 1] - rect.top;
+		
+		var e = 0.5 / 512.0;
 				
-		shaderVertices[dstIndex + 0] = x; // x in blocks
-		shaderVertices[dstIndex + 1] = y; // y in blocks
+		shaderVertices[dstIndex + 0] = Math.max(0, x - e); // x in blocks
+		shaderVertices[dstIndex + 1] = Math.max(0, y - e); // y in blocks
 		shaderVertices[dstIndex + 2] = start; // start in 1/512
 		shaderVertices[dstIndex + 3] = stride; // stride in 1/512
 	}

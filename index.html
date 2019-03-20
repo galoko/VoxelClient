@@ -1,9 +1,19 @@
 <html>
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=10.0, user-scalable=yes" />
+<style>
+canvas {
+  image-rendering: optimizeSpeed;             
+  image-rendering: -moz-crisp-edges;          
+  image-rendering: -webkit-optimize-contrast; 
+  image-rendering: -o-crisp-edges;            
+  image-rendering: pixelated;                 
+  -ms-interpolation-mode: nearest-neighbor;   
+}
+</style>
 </head>
 <body style="margin: 0px">
-<canvas id="scene">
+<canvas id="scene" style="width: 100%; height: 100%">
 </canvas>
 </body>
 <script id="surface.vert" type="x-shader/x-vertex">
@@ -33,12 +43,14 @@ void main()
 {
 	float start = texCoord.z; // in 1/512
 	float stride = texCoord.w; // in 1/512, e.g. 4/512 for 4 pixel width
+	float tx = texCoord.x;
+	float ty = texCoord.y;
 	
-	float ix = floor(texCoord.x); // integer part of coord
-	float iy = floor(texCoord.y); // integer part of coord
+	float ix = floor(tx); // integer part of coord
+	float iy = floor(ty); // integer part of coord
 	
-	float fx = texCoord.x - ix; // fraction part of coord
-	float fy = texCoord.y - iy; // fraction part of coord
+	float fx = tx - ix; // fraction part of coord
+	float fy = ty - iy; // fraction part of coord
 	
 	float pixel = start + iy * stride + ix * (1.0 / 512.0); // linear map coordinate
 	
@@ -57,8 +69,8 @@ void main()
 	blockCoord.x = mapLookup.r * 255.0;
 	blockCoord.y = mapLookup.g * 255.0;
 	
-	blockCoord.x = clamp(blockCoord.x + fx, blockCoord.x + (0.5 / 32.0), blockCoord.x + 1.0 - (0.5 / 32.0)) / 2.0;
-	blockCoord.y = clamp(blockCoord.y + fy, blockCoord.y + (0.5 / 32.0), blockCoord.y + 1.0 - (0.5 / 32.0)) / 2.0;
+	blockCoord.x = clamp(blockCoord.x + fx, blockCoord.x + (0.5 / 16.0), blockCoord.x + 1.0 - (0.5 / 16.0)) / 2.0;
+	blockCoord.y = clamp(blockCoord.y + fy, blockCoord.y + (0.5 / 16.0), blockCoord.y + 1.0 - (0.5 / 16.0)) / 2.0;
 	
 	float lightLevel = mapLookup.b;
 	vec4 light = vec4(lightLevel, lightLevel, lightLevel, 1.0);
